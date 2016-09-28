@@ -3,6 +3,9 @@
 const mh = require('multihashes')
 const UnixFS = require('ipfs-unixfs')
 const merkleDAG = require('ipfs-merkle-dag')
+const mapValues = require('async/mapValues')
+
+const getSizeAndHash = require('./util').getSizeAndHash
 
 const DAGLink = merkleDAG.DAGLink
 const DAGNode = merkleDAG.DAGNode
@@ -75,55 +78,75 @@ module.exports = (files, dagService, source, cb) => {
 
   function traverse (tree, path, done) {
     const keys = Object.keys(tree)
-    let tmpTree = tree
-    keys.map((key) => {
-      if (typeof tmpTree[key] === 'object' &&
-          !Buffer.isBuffer(tmpTree[key])) {
-        tmpTree[key] = traverse.call(this, tmpTree[key], path ? path + '/' + key : key, done)
+
+    mapValues(tree, (node, key, cb) => {
+      if (typeof node === 'object' && !Buffer.isBuffer(node)) {
+        traverse.call(this, node, path ? `${path}/${key}` : key, cb)
+      } else {
+        cb(null, node)
       }
-    })
-
-    // at this stage, all keys are multihashes
-    // create a dir node
-    // add all the multihashes as links
-    // return this new node multihash
-
-    const d = new UnixFS('directory')
-    const n = new DAGNode()
-
-    keys.forEach((key) => {
-      const b58mh = mh.toB58String(tmpTree[key])
-      const l = new DAGLink(
-        key, mhIndex[b58mh].size, tmpTree[key])
-      n.addRawLink(l)
-    })
-
-    n.data = d.marshal()
-
-    pendingWrites++
-    dagService.put(n, (err) => {
-      pendingWrites--
+    }, (err, tmpTree) => {
       if (err) {
-        source.push(new Error('failed to store dirNode'))
-      } else if (path) {
-        source.push({
-          path: path,
-          multihash: n.multihash(),
-          size: n.size()
+        return done(err)
+      }
+
+      // at this stage, all keys are multihashes
+      // create a dir node
+      // add all the multihashes as links
+      // return this new node multihash
+
+      const d = new UnixFS('directory')
+      const n = new DAGNode()
+
+      keys.forEach((key) => {
+        const b58mh = mh.toB58String(tmpTree[key])
+        const l = new DAGLink(
+          key, mhIndex[b58mh].size, tmpTree[key])
+        n.addRawLink(l)
+      })
+
+      n.data = d.marshal()
+
+      pendingWrites++
+      dagService.put(n, (err) => {
+        pendingWrites--
+        if (err) {
+          source.push(new Error('failed to store dirNode'))
+        } else if (path) {
+          getSizeAndHash(n, (err, stats) => {
+            if (err) {
+              return source.push(err)
+            }
+            source.push({
+              path: path,
+              multihash: stats.multihash,
+              size: stats.size
+            })
+          })
+        }
+
+        if (pendingWrites <= 0) {
+          finish()
+        }
+      })
+
+      function finish () {
+        if (!path) {
+          return done()
+        }
+
+        getSizeAndHash(n, (err, stats) => {
+          if (err) {
+            return done(err)
+          }
+
+          mhIndex[mh.toB58String(stats.multihash)] = {
+            size: stats.size
+          }
+          done(null, stats.multihash)
         })
       }
-
-      if (pendingWrites <= 0) {
-        done()
-      }
     })
-
-    if (!path) {
-      return
-    }
-
-    mhIndex[mh.toB58String(n.multihash())] = { size: n.size() }
-    return n.multihash()
   }
 
   traverse(fileTree, null, cb)

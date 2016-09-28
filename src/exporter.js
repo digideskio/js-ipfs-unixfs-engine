@@ -11,7 +11,11 @@ const dirExporter = require('./exporters/dir')
 const fileExporter = require('./exporters/file')
 
 module.exports = (hash, dagService, options) => {
-  hash = cleanMultihash(hash)
+  try {
+    hash = cleanMultihash(hash)
+  } catch (err) {
+    return pull.error(err)
+  }
   options = options || {}
 
   function visitor (item) {

@@ -6,10 +6,12 @@ const assert = require('assert')
 const pull = require('pull-stream')
 const pushable = require('pull-pushable')
 const write = require('pull-write')
-const parallel = require('run-parallel')
+const parallel = require('async/parallel')
+const waterfall = require('async/waterfall')
 
 const fsc = require('./chunker-fixed-size')
 const createAndStoreTree = require('./tree')
+const getSizeAndHash = require('./util').getSizeAndHash
 
 const DAGNode = merkleDAG.DAGNode
 
@@ -67,15 +69,18 @@ function createAndStoreDir (item, ds, cb) {
   const n = new DAGNode()
   n.data = d.marshal()
 
-  ds.put(n, (err) => {
-    if (err) return cb(err)
-    cb(null, {
-      path: item.path,
-      multihash: n.multihash(),
-      size: n.size()
-      // dataSize: d.fileSize()
-    })
-  })
+  waterfall([
+    (cb) => ds.put(n, cb),
+    (cb) => getSizeAndHash(n, cb),
+    (res, cb) => {
+      cb(null, {
+        path: item.path,
+        multihash: res.multihash,
+        size: res.size
+        // dataSize: d.fileSize()
+      })
+    }
+  ], cb)
 }
 
 function createAndStoreFile (file, ds, cb) {
@@ -102,14 +107,17 @@ function createAndStoreFile (file, ds, cb) {
       const l = new UnixFS('file', Buffer(chunk))
       const n = new DAGNode(l.marshal())
 
-      ds.put(n, (err) => {
+      waterfall([
+        (cb) => ds.put(n, cb),
+        (cb) => getSizeAndHash(n, cb)
+      ], (err, stats) => {
         if (err) {
-          return cb(new Error('Failed to store chunk'))
+          return cb(err)
         }
 
         cb(null, {
-          Hash: n.multihash(),
-          Size: n.size(),
+          Hash: stats.multihash,
+          Size: stats.size,
           leafSize: l.fileSize(),
           Name: ''
         })
@@ -140,13 +148,18 @@ function createAndStoreFile (file, ds, cb) {
       }
 
       n.data = f.marshal()
-      ds.put(n, (err) => {
-        if (err) return cb(err)
+      parallel([
+        (cb) => ds.put(n, cb),
+        (cb) => getSizeAndHash(n, cb)
+      ], (err, res) => {
+        if (err) {
+          return cb(err)
+        }
 
         cb(null, {
           path: file.path,
-          multihash: n.multihash(),
-          size: n.size()
+          multihash: res[1].multihash,
+          size: res[1].size
           // dataSize: f.fileSize()
         })
       })
