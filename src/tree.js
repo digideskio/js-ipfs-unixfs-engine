@@ -34,9 +34,9 @@ module.exports = (files, dagService, source, cb) => {
     if (splitted[0] === '') {
       splitted = splitted.slice(1)
     }
-    var tmpTree = fileTree
+    let tmpTree = fileTree
 
-    for (var i = 0; i < splitted.length; i++) {
+    for (let i = 0; i < splitted.length; i++) {
       if (!tmpTree[splitted[i]]) {
         tmpTree[splitted[i]] = {}
       }
@@ -73,15 +73,12 @@ module.exports = (files, dagService, source, cb) => {
   //   Once finished, add the result as a link to the dir node
   // If the value is not an object
   //   add as a link to the dirNode
-
-  let pendingWrites = 0
-
   function traverse (tree, path, done) {
     const keys = Object.keys(tree)
 
     mapValues(tree, (node, key, cb) => {
       if (typeof node === 'object' && !Buffer.isBuffer(node)) {
-        traverse.call(this, node, path ? `${path}/${key}` : key, cb)
+        traverse(node, path ? `${path}/${key}` : key, cb)
       } else {
         cb(null, node)
       }
@@ -107,9 +104,7 @@ module.exports = (files, dagService, source, cb) => {
 
       n.data = d.marshal()
 
-      pendingWrites++
       dagService.put(n, (err) => {
-        pendingWrites--
         if (err) {
           source.push(new Error('failed to store dirNode'))
         } else if (path) {
@@ -124,10 +119,7 @@ module.exports = (files, dagService, source, cb) => {
             })
           })
         }
-
-        if (pendingWrites <= 0) {
-          finish()
-        }
+        finish()
       })
 
       function finish () {

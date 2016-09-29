@@ -2,6 +2,7 @@
 
 const traverse = require('pull-traverse')
 const pull = require('pull-stream')
+const isIPFS = require('is-ipfs')
 
 const util = require('./util')
 const switchType = util.switchType
@@ -11,11 +12,11 @@ const dirExporter = require('./exporters/dir')
 const fileExporter = require('./exporters/file')
 
 module.exports = (hash, dagService, options) => {
-  try {
-    hash = cleanMultihash(hash)
-  } catch (err) {
-    return pull.error(err)
+  if (!isIPFS.multihash(hash)) {
+    return pull.error(new Error('not valid multihash'))
   }
+
+  hash = cleanMultihash(hash)
   options = options || {}
 
   function visitor (item) {
