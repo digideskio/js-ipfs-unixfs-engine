@@ -18,7 +18,7 @@ function stringifyMh (files) {
 }
 
 module.exports = function (repo) {
-  describe.only('importer', function () {
+  describe('importer', function () {
     let ipldResolver
 
     const bigFile = fs.readFileSync(path.join(__dirname, '/test-data/1.2MiB.txt'))
