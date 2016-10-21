@@ -1,56 +1,67 @@
 'use strict'
 
-const merkleDAG = require('ipfs-merkle-dag')
 const UnixFS = require('ipfs-unixfs')
 const assert = require('assert')
 const pull = require('pull-stream')
 const pushable = require('pull-pushable')
 const write = require('pull-write')
 const parallel = require('run-parallel')
+const dagPB = require('ipld-dag-pb')
+const CID = require('cids')
 
 const fsc = require('./chunker-fixed-size')
 const createAndStoreTree = require('./tree')
 
-const DAGNode = merkleDAG.DAGNode
+const DAGNode = dagPB.DAGNode
+const DAGLink = dagPB.DAGLink
 
 const CHUNK_SIZE = 262144
 
-module.exports = (dagService, options) => {
-  assert(dagService, 'Missing dagService')
+module.exports = (ipldResolver, options) => {
+  assert(ipldResolver, 'Missing IPLD Resolver')
 
   const files = []
 
   const source = pushable()
   const sink = write(
-    makeWriter(source, files, dagService),
+    makeWriter(source, files, ipldResolver),
     null,
     100,
     (err) => {
-      if (err) return source.end(err)
+      if (err) {
+        return source.end(err)
+      }
 
-      createAndStoreTree(files, dagService, source, () => {
+      createAndStoreTree(files, ipldResolver, source, () => {
         source.end()
       })
     }
   )
 
-  return {source, sink}
+  return {
+    source: source,
+    sink: sink
+  }
 }
 
-function makeWriter (source, files, dagService) {
+function makeWriter (source, files, ipldResolver) {
   return (items, cb) => {
     parallel(items.map((item) => (cb) => {
       if (!item.content) {
-        return createAndStoreDir(item, dagService, (err, node) => {
-          if (err) return cb(err)
+        return createAndStoreDir(item, ipldResolver, (err, node) => {
+          if (err) {
+            return cb(err)
+          }
           source.push(node)
           files.push(node)
           cb()
         })
       }
 
-      createAndStoreFile(item, dagService, (err, node) => {
-        if (err) return cb(err)
+      createAndStoreFile(item, ipldResolver, (err, node) => {
+        if (err) {
+          return cb(err)
+        }
         source.push(node)
         files.push(node)
         cb()
@@ -59,7 +70,7 @@ function makeWriter (source, files, dagService) {
   }
 }
 
-function createAndStoreDir (item, ds, cb) {
+function createAndStoreDir (item, ipldResolver, cb) {
   // 1. create the empty dir dag node
   // 2. write it to the dag store
 
@@ -67,8 +78,13 @@ function createAndStoreDir (item, ds, cb) {
   const n = new DAGNode()
   n.data = d.marshal()
 
-  ds.put(n, (err) => {
-    if (err) return cb(err)
+  ipldResolver.put({
+    node: n,
+    cid: new CID(n.multihash())
+  }, (err) => {
+    if (err) {
+      return cb(err)
+    }
     cb(null, {
       path: item.path,
       multihash: n.multihash(),
@@ -78,7 +94,7 @@ function createAndStoreDir (item, ds, cb) {
   })
 }
 
-function createAndStoreFile (file, ds, cb) {
+function createAndStoreFile (file, ipldResolver, cb) {
   if (Buffer.isBuffer(file.content)) {
     file.content = pull.values([file.content])
   }
@@ -102,7 +118,10 @@ function createAndStoreFile (file, ds, cb) {
       const l = new UnixFS('file', Buffer(chunk))
       const n = new DAGNode(l.marshal())
 
-      ds.put(n, (err) => {
+      ipldResolver.put({
+        node: n,
+        cid: new CID(n.multihash())
+      }, (err) => {
         if (err) {
           return cb(new Error('Failed to store chunk'))
         }
@@ -116,7 +135,9 @@ function createAndStoreFile (file, ds, cb) {
       })
     }),
     pull.collect((err, leaves) => {
-      if (err) return cb(err)
+      if (err) {
+        return cb(err)
+      }
 
       if (leaves.length === 1) {
         return cb(null, {
@@ -130,18 +151,23 @@ function createAndStoreFile (file, ds, cb) {
       // create a parent node and add all the leafs
 
       const f = new UnixFS('file')
-      const n = new merkleDAG.DAGNode()
+      const n = new DAGNode()
 
       for (let leaf of leaves) {
         f.addBlockSize(leaf.leafSize)
         n.addRawLink(
-          new merkleDAG.DAGLink(leaf.Name, leaf.Size, leaf.Hash)
+          new DAGLink(leaf.Name, leaf.Size, leaf.Hash)
         )
       }
 
       n.data = f.marshal()
-      ds.put(n, (err) => {
-        if (err) return cb(err)
+      ipldResolver.put({
+        node: n,
+        cid: new CID(n.multihash())
+      }, (err) => {
+        if (err) {
+          return cb(err)
+        }
 
         cb(null, {
           path: file.path,

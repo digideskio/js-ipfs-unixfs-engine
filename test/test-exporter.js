@@ -3,7 +3,7 @@
 
 const expect = require('chai').expect
 const BlockService = require('ipfs-block-service')
-const DAGService = require('ipfs-merkle-dag').DAGService
+const DAGService = require('ipld-resolver')
 const UnixFS = require('ipfs-unixfs')
 const fs = require('fs')
 const path = require('path')

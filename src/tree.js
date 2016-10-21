@@ -2,12 +2,13 @@
 
 const mh = require('multihashes')
 const UnixFS = require('ipfs-unixfs')
-const merkleDAG = require('ipfs-merkle-dag')
+const CID = require('cids')
+const dagPB = require('ipld-dag-pb')
 
-const DAGLink = merkleDAG.DAGLink
-const DAGNode = merkleDAG.DAGNode
+const DAGLink = dagPB.DAGLink
+const DAGNode = dagPB.DAGNode
 
-module.exports = (files, dagService, source, cb) => {
+module.exports = (files, ipldResolver, source, cb) => {
   // file struct
   // {
   //   path: // full path
@@ -101,7 +102,10 @@ module.exports = (files, dagService, source, cb) => {
     n.data = d.marshal()
 
     pendingWrites++
-    dagService.put(n, (err) => {
+    ipldResolver.put({
+      node: n,
+      cid: new CID(n.multihash())
+    }, (err) => {
       pendingWrites--
       if (err) {
         source.push(new Error('failed to store dirNode'))
