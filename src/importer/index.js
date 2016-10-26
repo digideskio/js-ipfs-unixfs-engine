@@ -3,14 +3,14 @@
 const UnixFS = require('ipfs-unixfs')
 const assert = require('assert')
 const pull = require('pull-stream')
-const pushable = require('pull-pushable')
-const write = require('pull-write')
+const pullPushable = require('pull-pushable')
+const pullWrite = require('pull-write')
 const parallel = require('run-parallel')
 const dagPB = require('ipld-dag-pb')
 const CID = require('cids')
 
-const fsc = require('./chunker-fixed-size')
-const createAndStoreTree = require('./tree')
+const fsc = require('./../chunker/fixed-size')
+const createAndStoreTree = require('./flush-tree')
 
 const DAGNode = dagPB.DAGNode
 const DAGLink = dagPB.DAGLink
@@ -22,8 +22,9 @@ module.exports = (ipldResolver, options) => {
 
   const files = []
 
-  const source = pushable()
-  const sink = write(
+  const source = pullPushable()
+
+  const sink = pullWrite(
     makeWriter(source, files, ipldResolver),
     null,
     100,
@@ -78,18 +79,30 @@ function createAndStoreDir (item, ipldResolver, cb) {
   const n = new DAGNode()
   n.data = d.marshal()
 
-  ipldResolver.put({
-    node: n,
-    cid: new CID(n.multihash())
-  }, (err) => {
+  n.multihash((err, multihash) => {
     if (err) {
       return cb(err)
     }
-    cb(null, {
-      path: item.path,
-      multihash: n.multihash(),
-      size: n.size()
-      // dataSize: d.fileSize()
+
+    ipldResolver.put({
+      node: n,
+      cid: new CID(multihash)
+    }, (err) => {
+      if (err) {
+        return cb(err)
+      }
+
+      n.size((err, size) => {
+        if (err) {
+          return cb(err)
+        }
+
+        cb(null, {
+          path: item.path,
+          multihash: multihash,
+          size: size
+        })
+      })
     })
   })
 }
@@ -118,19 +131,31 @@ function createAndStoreFile (file, ipldResolver, cb) {
       const l = new UnixFS('file', Buffer(chunk))
       const n = new DAGNode(l.marshal())
 
-      ipldResolver.put({
-        node: n,
-        cid: new CID(n.multihash())
-      }, (err) => {
+      n.multihash((err, multihash) => {
         if (err) {
-          return cb(new Error('Failed to store chunk'))
+          return cb(err)
         }
 
-        cb(null, {
-          Hash: n.multihash(),
-          Size: n.size(),
-          leafSize: l.fileSize(),
-          Name: ''
+        ipldResolver.put({
+          node: n,
+          cid: new CID(multihash)
+        }, (err) => {
+          if (err) {
+            return cb(new Error('Failed to store chunk'))
+          }
+
+          n.size((err, size) => {
+            if (err) {
+              return cb(err)
+            }
+
+            cb(null, {
+              Hash: multihash,
+              Size: size,
+              leafSize: l.fileSize(),
+              Name: ''
+            })
+          })
         })
       })
     }),
@@ -144,7 +169,6 @@ function createAndStoreFile (file, ipldResolver, cb) {
           path: file.path,
           multihash: leaves[0].Hash,
           size: leaves[0].Size
-          // dataSize: leaves[0].leafSize
         })
       }
 
@@ -161,19 +185,31 @@ function createAndStoreFile (file, ipldResolver, cb) {
       }
 
       n.data = f.marshal()
-      ipldResolver.put({
-        node: n,
-        cid: new CID(n.multihash())
-      }, (err) => {
+
+      n.multihash((err, multihash) => {
         if (err) {
           return cb(err)
         }
 
-        cb(null, {
-          path: file.path,
-          multihash: n.multihash(),
-          size: n.size()
-          // dataSize: f.fileSize()
+        ipldResolver.put({
+          node: n,
+          cid: new CID(multihash)
+        }, (err) => {
+          if (err) {
+            return cb(err)
+          }
+
+          n.size((err, size) => {
+            if (err) {
+              return cb(err)
+            }
+
+            cb(null, {
+              path: file.path,
+              multihash: multihash,
+              size: size
+            })
+          })
         })
       })
     })

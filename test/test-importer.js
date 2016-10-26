@@ -18,7 +18,7 @@ function stringifyMh (files) {
 }
 
 module.exports = function (repo) {
-  describe('importer', function () {
+  describe.only('importer', function () {
     let ipldResolver
 
     const bigFile = fs.readFileSync(path.join(__dirname, '/test-data/1.2MiB.txt'))
@@ -94,6 +94,7 @@ module.exports = function (repo) {
         importer(ipldResolver),
         pull.collect((err, files) => {
           expect(err).to.not.exist
+          console.log(files)
           expect(files.length).to.equal(3)
           stringifyMh(files).forEach((file) => {
             if (file.path === 'foo/bar/200Bytes.txt') {

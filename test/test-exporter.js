@@ -20,6 +20,7 @@ module.exports = (repo) => {
     let ipldResolver
 
     const bigFile = fs.readFileSync(path.join(__dirname, '/test-data/1.2MiB.txt'))
+
     before(() => {
       const bs = new BlockService(repo)
       ipldResolver = new IPLDResolver(bs)

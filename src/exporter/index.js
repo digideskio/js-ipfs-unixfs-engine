@@ -4,12 +4,12 @@ const traverse = require('pull-traverse')
 const pull = require('pull-stream')
 const CID = require('cids')
 
-const util = require('./util')
+const util = require('./../util')
 const switchType = util.switchType
 const cleanMultihash = util.cleanMultihash
 
-const dirExporter = require('./exporters/dir')
-const fileExporter = require('./exporters/file')
+const dirExporter = require('./dir')
+const fileExporter = require('./file')
 
 module.exports = (hash, ipldResolver, options) => {
   hash = cleanMultihash(hash)
