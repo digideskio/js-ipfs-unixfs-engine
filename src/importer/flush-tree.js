@@ -4,7 +4,8 @@ const mh = require('multihashes')
 const UnixFS = require('ipfs-unixfs')
 const CID = require('cids')
 const dagPB = require('ipld-dag-pb')
-const asyncEach = require('async/each')
+const mapValues = require('async/mapValues')
+const parallel = require('async/parallel')
 
 const DAGLink = dagPB.DAGLink
 const DAGNode = dagPB.DAGNode
@@ -102,30 +103,17 @@ function createSizeIndex (files) {
  *    add as a link to the dirNode
  */
 function traverse (tree, sizeIndex, path, ipldResolver, source, done) {
-  const keys = Object.keys(tree)
-
-  let tmp = tree
-
-  asyncEach(keys, (key, cb) => {
-    if (isLeaf(tmp[key])) {
-      cb()
-    } else {
-      path = path ? path + '/' + key : key
-      console.log('->', path)
-
-      traverse(tmp[key], sizeIndex, path, ipldResolver, source, (err, multihash) => {
-        if (err) {
-          return done(err)
-        }
-        tmp[key] = multihash
-        cb()
-      })
+  mapValues(tree, (node, key, cb) => {
+    if (isLeaf(node)) {
+      return cb(null, node)
     }
-  }, () => {
-    next(tmp, done)
-  })
 
-  function next (tree, cb) {
+    traverse(node, sizeIndex, path ? `${path}/${key}` : key, ipldResolver, source, cb)
+  }, (err, tree) => {
+    if (err) {
+      return done(err)
+    }
+
     // at this stage, all keys are multihashes
     // create a dir node
     // add all the multihashes as links
@@ -142,39 +130,36 @@ function traverse (tree, sizeIndex, path, ipldResolver, source, done) {
       node.addRawLink(link)
     })
 
-    console.log('0---->', path)
-    node.multihash((err, multihash) => {
+    parallel([
+      (cb) => node.multihash(cb),
+      (cb) => node.size(cb)
+    ], (err, res) => {
       if (err) {
-        return cb(err)
+        return done(err)
       }
-      node.size((err, size) => {
+
+      const multihash = res[0]
+      const size = res[1]
+
+      sizeIndex[mh.toB58String(multihash)] = size
+      ipldResolver.put({
+        node: node,
+        cid: new CID(multihash)
+      }, (err) => {
         if (err) {
-          return cb(err)
+          source.push(new Error('failed to store dirNode'))
+        } else if (path) {
+          source.push({
+            path: path,
+            multihash: multihash,
+            size: size
+          })
         }
 
-        sizeIndex[mh.toB58String(multihash)] = size
-        console.log('1---->', path)
-
-        ipldResolver.put({
-          node: node,
-          cid: new CID(multihash)
-        }, (err) => {
-          if (err) {
-            source.push(new Error('failed to store dirNode'))
-          } else if (path) {
-            console.log('2---->', path)
-            source.push({
-              path: path,
-              multihash: multihash,
-              size: size
-            })
-          }
-
-          cb(null, multihash)
-        })
+        done(null, multihash)
       })
     })
-  }
+  })
 }
 
 function isLeaf (value) {
